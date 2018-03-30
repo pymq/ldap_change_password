@@ -1,0 +1,4 @@
+Django>=1.11.0,<2.0
+dj-database-url
+python-decouple
+django-widget-tweaks
