@@ -1,11 +1,14 @@
 from django import forms
 from django.contrib.auth import password_validation
+from django.conf import settings
+import ldap
 
 
 class ChangePasswordForm(forms.Form):
     error_messages = {
         'password_mismatch': ("The two password fields didn't match."),
         'password_incorrect': ("Your old password was entered incorrectly. Please enter it again."),
+        'invalid_credentials': ("Invalid username or old password."),
     }
     username = forms.CharField(max_length=254, required=True)
     old_password = forms.CharField(
@@ -29,17 +32,23 @@ class ChangePasswordForm(forms.Form):
         help_text=("Enter the same password as before, for verification."),
     )
 
-    def clean_old_password(self):
+    def clean(self):
         """
-        Validates that the old_password field is correct.
+        Validates that the old_password and username are correct.
         """
         old_password = self.cleaned_data["old_password"]
-        # if not self.user.check_password(old_password):
-        #     raise forms.ValidationError(
-        #         self.error_messages['password_incorrect'],
-        #         code='password_incorrect',
-        #     )
-        return old_password
+        username = self.cleaned_data["username"]
+
+        try:
+            con = ldap.initialize(settings.LDAP_CONNECTION_URL, bytes_mode=False)
+            con.simple_bind_s(f'uid={username},{settings.LDAP_PATH}', old_password)
+            con.unbind_s()
+        except ldap.INVALID_CREDENTIALS:
+            raise forms.ValidationError(
+                self.error_messages['invalid_credentials'],
+                code='invalid_credentials',
+            )
+        return super().clean()
 
     def clean_new_password2(self):
         password1 = self.cleaned_data.get('new_password1')
@@ -50,12 +59,14 @@ class ChangePasswordForm(forms.Form):
                     self.error_messages['password_mismatch'],
                     code='password_mismatch',
                 )
-        # password_validation.validate_password(password2, self.user)
         return password2
 
-    def save(self, commit=True):
-        # password = self.cleaned_data["new_password1"]
-        # self.user.set_password(password)
-        # if commit:
-        #     self.user.save()
+    def save(self):
+        old_password = self.cleaned_data["old_password"]
+        new_password = self.cleaned_data["new_password1"]
+        username = self.cleaned_data["username"]
+        con = ldap.initialize(settings.LDAP_CONNECTION_URL, bytes_mode=False)
+        con.simple_bind_s(f'uid={username},{settings.LDAP_PATH}', old_password)
+        con.passwd_s(f'uid={username},{settings.LDAP_PATH}', old_password, new_password)
+        con.unbind_s()
         return None
